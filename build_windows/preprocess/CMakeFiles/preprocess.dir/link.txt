@@ -1,0 +1,3 @@
+/usr/bin/cmake -E rm -f CMakeFiles/preprocess.dir/objects.a
+/usr/bin/x86_64-w64-mingw32-ar qc CMakeFiles/preprocess.dir/objects.a @CMakeFiles/preprocess.dir/objects1.rsp
+/usr/bin/x86_64-w64-mingw32-g++-posix  -march=haswell -mtune=haswell -mavx2 -mbmi2 -DBUILD_AVX2_BMI2 -DBUILD_FAST_PEXT -DBUILD_AVX2_BMI2 -O3 -DNDEBUG -Wl,--whole-archive CMakeFiles/preprocess.dir/objects.a -Wl,--no-whole-archive -o preprocess.exe -Wl,--out-implib,libpreprocess.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles/preprocess.dir/linklibs.rsp

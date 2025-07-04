@@ -1,0 +1,3 @@
+/usr/bin/cmake -E rm -f CMakeFiles/integral.dir/objects.a
+/usr/bin/x86_64-w64-mingw32-ar qc CMakeFiles/integral.dir/objects.a @CMakeFiles/integral.dir/objects1.rsp
+/usr/bin/x86_64-w64-mingw32-g++-posix  -march=haswell -mtune=haswell -mavx2 -mbmi2 -DBUILD_AVX2_BMI2 -DUSE_PEXT -DBUILD_AVX2_BMI2 -static -pthread -O3 -funroll-loops -DNDEBUG -flto -fno-fat-lto-objects -Wl,--whole-archive CMakeFiles/integral.dir/objects.a -Wl,--no-whole-archive -o integral.exe -Wl,--out-implib,libintegral.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles/integral.dir/linklibs.rsp

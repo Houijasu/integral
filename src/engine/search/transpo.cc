@@ -9,27 +9,32 @@ namespace search {
 [[nodiscard]] TranspositionTableEntry *TranspositionTable::Probe(
     const U64 &key) {
   auto &cluster = (*this)[key];
-  // Default to replacing the first entry (if it's available)
-  auto replace_entry = &cluster.entries[0];
-  // Find another entry if the first one is already taken
-  if (replace_entry->key != 0 && !replace_entry->CompareKey(key)) {
-    for (int i = 1; i < kTTClusterSize; i++) {
-      const auto entry = &cluster.entries[i];
-      // If this entry is available, we can attempt to write to it
-      if (entry->key == 0 || entry->CompareKey(key)) {
-        return entry;
-      }
-      // Always prefer the lowest quality entry
-      const int lowest_quality =
-          replace_entry->depth - 8 * GetAgeDelta(replace_entry);
-      const int current_quality = entry->depth - 8 * GetAgeDelta(entry);
-      if (lowest_quality > current_quality) {
-        replace_entry = entry;
-      }
+  const U16 key16 = static_cast<U16>(key);
+  
+  // Pre-calculate quality scores for all entries
+  int qualities[kTTClusterSize];
+  int min_quality = INT_MAX;
+  int min_quality_idx = 0;
+  
+  // First pass: find exact match or empty slot, calculate qualities
+  for (int i = 0; i < kTTClusterSize; i++) {
+    const auto entry = &cluster.entries[i];
+    
+    // Fast path: exact key match or empty slot
+    if (entry->key == 0 || entry->key == key16) {
+      return entry;
+    }
+    
+    // Calculate quality score for replacement decision
+    qualities[i] = entry->depth - 8 * GetAgeDelta(entry);
+    if (qualities[i] < min_quality) {
+      min_quality = qualities[i];
+      min_quality_idx = i;
     }
   }
-
-  return replace_entry;
+  
+  // No exact match found, return lowest quality entry
+  return &cluster.entries[min_quality_idx];
 }
 
 void TranspositionTable::Save(TranspositionTableEntry *old_entry,
