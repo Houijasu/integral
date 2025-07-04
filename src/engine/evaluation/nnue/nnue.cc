@@ -103,6 +103,24 @@ Score Evaluate(Board &board) {
       // Each bit in `nnz_mask` corresponds to whether a specific feature is
       // positive (1) or zero (0)
       const auto nnz_mask = simd::GetNnzMask(features);
+      
+#if defined(__AVX2__)
+      // Optimized sparse processing using AVX2 instructions
+      // Convert mask to indices directly using bit manipulation
+      if (nnz_mask) {
+        // Use PDEP to scatter set bits to byte positions
+        const U64 expanded = _pdep_u64(0x0706050403020100ULL, nnz_mask);
+        const int popcount = __builtin_popcountll(nnz_mask);
+        
+        // Store indices efficiently
+        const auto base_vec = _mm_set1_epi16(i + them * arch::kL1Size / 2);
+        const auto idx_vec = _mm_cvtepu8_epi16(_mm_set_epi64x(0, expanded));
+        const auto abs_indices = _mm_add_epi16(base_vec, idx_vec);
+        _mm_storeu_si128(reinterpret_cast<__m128i *>(&nnz_indices[nnz_count]), abs_indices);
+        nnz_count += popcount;
+      }
+#else
+      // Original implementation for non-AVX2 builds
       // Loop through 8-bit (U8) slices of this 16-bit mask
       for (int chunk = 0; chunk < kI32ChunkSize; chunk += 8) {
         // Extract the 8-bit slice from the mask
@@ -122,6 +140,7 @@ Score Evaluate(Board &board) {
         // Increment to reflect the starting index of the next slice
         nnz_base = _mm_add_epi16(nnz_base, lookup_increment);
       }
+#endif
     }
   }
 
@@ -133,6 +152,35 @@ Score Evaluate(Board &board) {
   alignas(simd::kAlignment) std::array<I32, arch::kL2Size> l1_sums{};
   {
     int i = 0;
+#if defined(__AVX2__)
+    // Process 4 features at a time with AVX2
+    for (; i < nnz_count - 3; i += 4) {
+      const int idx0 = nnz_indices[i] * 4;
+      const int idx1 = nnz_indices[i + 1] * 4;
+      const int idx2 = nnz_indices[i + 2] * 4;
+      const int idx3 = nnz_indices[i + 3] * 4;
+      
+      // Load 4 feature values
+      const auto feature0 = simd::SetEpi32(*reinterpret_cast<I32 *>(&feature_output[idx0]));
+      const auto feature1 = simd::SetEpi32(*reinterpret_cast<I32 *>(&feature_output[idx1]));
+      const auto feature2 = simd::SetEpi32(*reinterpret_cast<I32 *>(&feature_output[idx2]));
+      const auto feature3 = simd::SetEpi32(*reinterpret_cast<I32 *>(&feature_output[idx3]));
+      
+      // Process weights with unrolled loop
+      for (int j = 0; j < arch::kL2Size; j += kI32ChunkSize) {
+        const auto weight0 = *reinterpret_cast<simd::Vepi8 *>(&network->l1_weights[bucket][idx0 + j / 4]);
+        const auto weight1 = *reinterpret_cast<simd::Vepi8 *>(&network->l1_weights[bucket][idx1 + j / 4]);
+        const auto weight2 = *reinterpret_cast<simd::Vepi8 *>(&network->l1_weights[bucket][idx2 + j / 4]);
+        const auto weight3 = *reinterpret_cast<simd::Vepi8 *>(&network->l1_weights[bucket][idx3 + j / 4]);
+        
+        auto &sums = *reinterpret_cast<simd::Vepi32 *>(&l1_sums[j]);
+        sums = simd::DpbusdEpi32x2(sums, feature0, weight0, feature1, weight1);
+        sums = simd::DpbusdEpi32x2(sums, feature2, weight2, feature3, weight3);
+      }
+    }
+#endif
+    
+    // Process 2 features at a time
     for (; i < nnz_count - 1; i += 2) {
       const int idx = nnz_indices[i] * 4, idx_two = nnz_indices[i + 1] * 4;
       const auto feature_vector =
