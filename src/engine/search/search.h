@@ -139,19 +139,29 @@ struct alignas(64) Thread {
     tb_hits = 0;
   }
 
-  std::thread raw_thread;
-  U32 id;
-  Board board;
-  history::History history;
+  // Hot path data - frequently accessed during search
+  alignas(64) Board board;  // Align to cache line
   Stack stack;
-  std::atomic<U64> nodes_searched;
+  history::History history;
+  
+  // Search state - accessed together
+  alignas(64) std::atomic<U64> nodes_searched;  // Align to avoid false sharing
+  std::atomic<U64> tb_hits;
   std::array<Score, kMaxSearchDepth + 1> scores;
   Score previous_score;
   U16 root_depth, sel_depth;
-  std::atomic<U64> tb_hits;
-  int pv_move_idx;
-  RootMoveList root_moves;
   U16 nmp_min_ply;
+  int pv_move_idx;
+  
+  // Root move data - accessed less frequently
+  alignas(64) RootMoveList root_moves;  // Separate cache line
+  
+  // Thread management - rarely accessed during search
+  std::thread raw_thread;
+  U32 id;
+  
+  // Padding to ensure size is multiple of cache line
+  char padding_[64 - sizeof(std::thread) - sizeof(U32)];
 };
 
 class Searcher {
