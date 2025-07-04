@@ -387,7 +387,15 @@ Score Searcher::QuiescentSearch(Thread &thread,
         history.correction_history->GetContEntry(state, move);
     stack->history_score = history.GetMoveScore(state, move, stack);
 
-    thread.nodes_searched.fetch_add(1, std::memory_order_relaxed);
+    // Use thread-local node counter
+    static thread_local U64 qs_local_nodes = 0;
+    qs_local_nodes++;
+    
+    // Periodically update the atomic counter
+    if ((qs_local_nodes & 1023) == 0) {
+      thread.nodes_searched.fetch_add(qs_local_nodes, std::memory_order_relaxed);
+      qs_local_nodes = 0;
+    }
 
     board.MakeMove(move);
     const Score score =
@@ -478,8 +486,15 @@ Score Searcher::PVSearch(Thread &thread,
   const auto &state = board.GetState();
 
   static thread_local int counter = 0;
+  static thread_local U64 local_nodes = 0;
+  
   if (thread.IsMainThread() && (++counter & 4095) == 0) {
     counter = 0;
+    // Update atomic counter with local nodes
+    if (local_nodes > 0) {
+      thread.nodes_searched.fetch_add(local_nodes, std::memory_order_relaxed);
+      local_nodes = 0;
+    }
     if (time_mgmt_.TimesUp(thread.nodes_searched)) {
       stop_.store(true, std::memory_order_relaxed);
     }
@@ -1020,8 +1035,15 @@ Score Searcher::PVSearch(Thread &thread,
     board.MakeMove(move);
 
     const bool gives_check = state.InCheck();
-    const U32 prev_nodes_searched =
-        thread.nodes_searched.fetch_add(1, std::memory_order_relaxed);
+    local_nodes++;
+    
+    // Periodically flush local nodes to atomic counter
+    if ((local_nodes & 1023) == 0) {
+      thread.nodes_searched.fetch_add(local_nodes, std::memory_order_relaxed);
+      local_nodes = 0;
+    }
+    
+    const U32 prev_nodes_searched = thread.nodes_searched.load(std::memory_order_relaxed) + local_nodes;
 
     // Principal Variation Search (PVS)
     int new_depth = depth + extensions - 1;
@@ -1126,10 +1148,6 @@ Score Searcher::PVSearch(Thread &thread,
     }
 
     board.UndoMove();
-
-    if (ShouldQuit()) {
-      return 0;
-    }
 
     moves_seen++;
 
@@ -1411,17 +1429,19 @@ const TimeManagement &Searcher::GetTimeManagement() const {
 }
 
 U64 Searcher::GetNodesSearched() const {
-  return std::accumulate(
-      threads_.begin(), threads_.end(), 0ULL, [](auto sum, const auto &thread) {
-        return sum + thread->nodes_searched.load(std::memory_order_relaxed);
-      });
+  U64 total = 0;
+  for (const auto &thread : threads_) {
+    total += thread->nodes_searched.load(std::memory_order_relaxed);
+  }
+  return total;
 }
 
 U64 Searcher::GetTbHits() const {
-  return std::accumulate(
-      threads_.begin(), threads_.end(), 0ULL, [](auto sum, const auto &thread) {
-        return sum + thread->tb_hits.load(std::memory_order_relaxed);
-      });
+  U64 total = 0;
+  for (const auto &thread : threads_) {
+    total += thread->tb_hits.load(std::memory_order_relaxed);
+  }
+  return total;
 }
 
 void Searcher::ResizeHash(U64 size) {
