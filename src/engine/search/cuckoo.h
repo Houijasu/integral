@@ -10,6 +10,9 @@ namespace search::cuckoo {
 inline std::array<U64, 8192> keys;
 inline std::array<Move, 8192> moves;
 
+// Bloom filter for fast negative lookups
+inline std::array<U64, 128> bloom_filter;
+
 constexpr U64 H1(U64 key) {
   return static_cast<U64>(key & 0x1FFF);
 }

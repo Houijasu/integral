@@ -5,6 +5,7 @@ namespace search::cuckoo {
 void Initialize() {
   moves.fill(Move::NullMove());
   keys.fill(0);
+  bloom_filter.fill(0);
 
   U32 count = 0;
 
@@ -39,6 +40,13 @@ void Initialize() {
           auto move = Move(from, to);
           auto key = zobrist::pieces[colored_piece][from] ^
                      zobrist::pieces[colored_piece][to] ^ zobrist::turn;
+          
+          // Add to bloom filter for fast negative lookups
+          const U64 bloom_idx1 = (key >> 6) & 127;
+          const U64 bloom_idx2 = (key >> 13) & 127;
+          bloom_filter[bloom_idx1] |= 1ULL << (key & 63);
+          bloom_filter[bloom_idx2] |= 1ULL << ((key >> 7) & 63);
+          
           U32 slot = H1(key);
 
           while (true) {

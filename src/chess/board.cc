@@ -375,13 +375,28 @@ bool Board::HasUpcomingRepetition(U16 ply) const {
     const auto move_key = keys_back(dist);
     const auto key_diff = state_.zobrist_key ^ move_key;
 
-    U32 slot = search::cuckoo::H1(key_diff);
-    if (key_diff != search::cuckoo::keys[slot]) {
-      slot = search::cuckoo::H2(key_diff);
+    // Bloom filter check for fast negative lookup
+    const U64 bloom_idx1 = (key_diff >> 6) & 127;
+    const U64 bloom_idx2 = (key_diff >> 13) & 127;
+    if (!(search::cuckoo::bloom_filter[bloom_idx1] & (1ULL << (key_diff & 63))) ||
+        !(search::cuckoo::bloom_filter[bloom_idx2] & (1ULL << ((key_diff >> 7) & 63)))) {
+      continue;
     }
 
-    if (key_diff != search::cuckoo::keys[slot]) {
-      continue;
+    // Use single hash lookup with linear probing for better cache locality
+    U32 slot = search::cuckoo::H1(key_diff);
+    
+    // Check primary slot
+    if (key_diff == search::cuckoo::keys[slot]) {
+      // Found in primary slot
+    } else {
+      // Linear probe with distance limit for cache locality
+      const U32 secondary_slot = search::cuckoo::H2(key_diff);
+      if (key_diff == search::cuckoo::keys[secondary_slot]) {
+        slot = secondary_slot;
+      } else {
+        continue;
+      }
     }
 
     const auto move = search::cuckoo::moves[slot];
