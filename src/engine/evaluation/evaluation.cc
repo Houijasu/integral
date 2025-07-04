@@ -61,40 +61,47 @@ bool StaticExchange(Move move, int threshold, const BoardState &state) {
   occupied.ClearBit(to);
 
   // Get all pieces that attack the capture square
-  auto pawn_attackers =
-      (move_gen::PawnAttacks(to, Color::kWhite) & state.Pawns(Color::kBlack)) |
-      (move_gen::PawnAttacks(to, Color::kBlack) & state.Pawns(Color::kWhite));
-  auto knight_attackers = move_gen::KnightMoves(to) & state.Knights();
-
-  BitBoard bishop_attacks = move_gen::BishopMoves(to, occupied);
-  BitBoard rook_attacks = move_gen::RookMoves(to, occupied);
-
-  const BitBoard bishop_attackers = bishop_attacks & bishops;
-  const BitBoard rook_attackers = rook_attacks & rooks;
-  const BitBoard queen_attackers = (bishop_attacks | rook_attacks) & queens;
+  // Pawns attack differently based on color, so handle separately
+  const BitBoard white_pawn_attacks = move_gen::PawnAttacks(to, Color::kWhite);
+  const BitBoard black_pawn_attacks = move_gen::PawnAttacks(to, Color::kBlack);
+  const BitBoard pawn_attackers = (white_pawn_attacks & state.Pawns(Color::kBlack)) |
+                                  (black_pawn_attacks & state.Pawns(Color::kWhite));
+  
+  // Non-sliding pieces
+  const BitBoard knight_attackers = move_gen::KnightMoves(to) & knights;
   const BitBoard king_attackers = move_gen::KingAttacks(to) & kings;
 
-  // Compute all attacking pieces for this square minus the captured and
-  // capturing piece
-  BitBoard all_attackers = pawn_attackers | knight_attackers |
-                           bishop_attackers | rook_attackers | queen_attackers |
-                           king_attackers;
-  all_attackers &= occupied;
+  // Sliding pieces - calculate attacks once and reuse
+  const BitBoard bishop_attacks = move_gen::BishopMoves(to, occupied);
+  const BitBoard rook_attacks = move_gen::RookMoves(to, occupied);
+  
+  const BitBoard diagonal_attackers = bishop_attacks & (bishops | queens);
+  const BitBoard straight_attackers = rook_attacks & (rooks | queens);
+
+  // Compute all attacking pieces for this square
+  BitBoard all_attackers = (pawn_attackers | knight_attackers | king_attackers |
+                           diagonal_attackers | straight_attackers) & occupied;
 
   Color turn = state.turn;
   Color winner = state.turn;
   
-  const auto white_pinned = state.pinned[Color::kWhite] & state.Occupied(Color::kWhite);
-  const auto black_pinned = state.pinned[Color::kBlack] & state.Occupied(Color::kBlack);
+  // Pre-calculate pinned pieces and rays for efficiency
+  const BitBoard white_pinned = state.pinned[Color::kWhite] & state.Occupied(Color::kWhite);
+  const BitBoard black_pinned = state.pinned[Color::kBlack] & state.Occupied(Color::kBlack);
   
-  const auto white_king_ray = move_gen::RayIntersecting(to, state.King(Color::kWhite).GetLsb());
-  const auto black_king_ray = move_gen::RayIntersecting(to, state.King(Color::kBlack).GetLsb());
-
-  const auto white_pinned_aligned = white_king_ray & white_pinned;
-  const auto black_pinned_aligned = black_king_ray & black_pinned;
-
-  const auto pinned = white_pinned | black_pinned;
-  const auto pinned_aligned = white_pinned_aligned | black_pinned_aligned;
+  // Only calculate king rays if there are pinned pieces
+  BitBoard white_pinned_aligned = 0;
+  BitBoard black_pinned_aligned = 0;
+  
+  if (white_pinned) {
+    const BitBoard white_king_ray = move_gen::RayIntersecting(to, state.King(Color::kWhite).GetLsb());
+    white_pinned_aligned = white_king_ray & white_pinned;
+  }
+  
+  if (black_pinned) {
+    const BitBoard black_king_ray = move_gen::RayIntersecting(to, state.King(Color::kBlack).GetLsb());
+    black_pinned_aligned = black_king_ray & black_pinned;
+  }
 
   // Loop through all pieces that attack the capture square
   while (true) {
@@ -102,8 +109,12 @@ bool StaticExchange(Move move, int threshold, const BoardState &state) {
     all_attackers &= occupied;
 
     BitBoard our_attackers = all_attackers & state.Occupied(turn);
-    if ((state.pinned[turn] & occupied)) {
-      our_attackers &= ~pinned | pinned_aligned;
+    
+    // Handle pinned pieces - only pieces pinned and aligned to target square can move
+    if (turn == Color::kWhite && white_pinned) {
+      our_attackers &= ~white_pinned | white_pinned_aligned;
+    } else if (turn == Color::kBlack && black_pinned) {
+      our_attackers &= ~black_pinned | black_pinned_aligned;
     }
 
     // If the current side to move has no attackers left, they lose
@@ -125,8 +136,8 @@ bool StaticExchange(Move move, int threshold, const BoardState &state) {
       occupied.ClearBit(next_attacker.GetLsb());
 
       // Add pieces that were diagonal xray attacking the captured piece
-      bishop_attacks = move_gen::BishopMoves(to, occupied);
-      all_attackers |= bishop_attacks & (bishops | queens);
+      const BitBoard new_bishop_attacks = move_gen::BishopMoves(to, occupied);
+      all_attackers |= new_bishop_attacks & (bishops | queens);
     } else if ((next_attacker = our_attackers & knights)) {
       attacker_value = *kSeePieceScores[kKnight];
       occupied.ClearBit(next_attacker.GetLsb());
@@ -135,24 +146,24 @@ bool StaticExchange(Move move, int threshold, const BoardState &state) {
       occupied.ClearBit(next_attacker.GetLsb());
 
       // Add pieces that were xray attacking the captured piece
-      bishop_attacks = move_gen::BishopMoves(to, occupied);
-      all_attackers |= bishop_attacks & (bishops | queens);
+      const BitBoard new_bishop_attacks = move_gen::BishopMoves(to, occupied);
+      all_attackers |= new_bishop_attacks & (bishops | queens);
     } else if ((next_attacker = our_attackers & rooks)) {
       attacker_value = *kSeePieceScores[kRook];
       occupied.ClearBit(next_attacker.GetLsb());
 
       // Add pieces that were xray attacking the captured piece
-      rook_attacks = move_gen::RookMoves(to, occupied);
-      all_attackers |= rook_attacks & (rooks | queens);
+      const BitBoard new_rook_attacks = move_gen::RookMoves(to, occupied);
+      all_attackers |= new_rook_attacks & (rooks | queens);
     } else if ((next_attacker = our_attackers & queens)) {
       attacker_value = *kSeePieceScores[kQueen];
       occupied.ClearBit(next_attacker.GetLsb());
 
       // Add pieces that were xray attacking the captured piece
-      rook_attacks = move_gen::RookMoves(to, occupied);
-      bishop_attacks = move_gen::BishopMoves(to, occupied);
-      all_attackers |= (rook_attacks & (queens | rooks)) |
-                       (bishop_attacks & (queens | bishops));
+      const BitBoard new_rook_attacks = move_gen::RookMoves(to, occupied);
+      const BitBoard new_bishop_attacks = move_gen::BishopMoves(to, occupied);
+      all_attackers |= (new_rook_attacks & (queens | rooks)) |
+                       (new_bishop_attacks & (queens | bishops));
     } else {
       // King: check if we capture a piece that our opponent is still
       // attacking
