@@ -1,26 +1,48 @@
 #include "evaluation.h"
 
 #include "nnue/nnue.h"
+#include "eval_cache.h"
 
 namespace eval {
 
 TUNABLE_STEP(kMaterialScaleBase, 26909, 10000, 32768, false, 500);
 
+// Thread-local evaluation cache for each thread
+thread_local EvalCache eval_cache;
+
+void ClearEvalCache() {
+  eval_cache.Clear();
+}
+
 Score Evaluate(Board &board) {
+  const auto &state = board.GetState();
+  const U64 key = state.zobrist_key;
+  
+  // Check cache first
+  Score cached_score;
+  if (eval_cache.Probe(key, cached_score)) {
+    return cached_score;
+  }
+  
   const auto network_eval = nnue::Evaluate(board);
 
 #if DATAGEN
+  eval_cache.Store(key, network_eval);
   return network_eval;
 #endif
 
-  const auto &state = board.GetState();
   const auto material_phase =
       *kSeePieceScores[kKnight] * state.Knights().PopCount() +
       *kSeePieceScores[kBishop] * state.Bishops().PopCount() +
       *kSeePieceScores[kRook] * state.Rooks().PopCount() +
       *kSeePieceScores[kQueen] * state.Queens().PopCount();
 
-  return network_eval * (kMaterialScaleBase + material_phase) / 32768;
+  const Score final_eval = network_eval * (kMaterialScaleBase + material_phase) / 32768;
+  
+  // Store in cache
+  eval_cache.Store(key, final_eval);
+  
+  return final_eval;
 }
 
 bool StaticExchange(Move move, int threshold, const BoardState &state) {

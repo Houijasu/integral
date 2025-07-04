@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "../../data_gen/data_gen.h"
+#include "../evaluation/evaluation.h"
 #include "../uci/reporter.h"
 #include "constants.h"
 #include "fmt/format.h"
@@ -1419,6 +1420,9 @@ void Searcher::NewGame(bool clear_tables) {
     transposition_table_.Clear(std::max<int>(1, threads_.size()));
   }
 
+  // Clear evaluation cache for all threads
+  eval::ClearEvalCache();
+  
   for (auto &thread : threads_) {
     thread->NewGame();
   }

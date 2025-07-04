@@ -396,4 +396,6 @@ CMakeFiles/integral.dir/src/engine/evaluation/evaluation.cc.o: \
  /usr/lib/gcc/x86_64-linux-gnu/11/include/keylockerintrin.h \
  /home/ereny/Projects/integral/src/engine/evaluation/nnue/../../../../shared/simd.h \
  /home/ereny/Projects/integral/src/engine/evaluation/nnue/../../../chess/board.h \
- /home/ereny/Projects/integral/src/engine/evaluation/nnue/../../../utils/types.h
+ /home/ereny/Projects/integral/src/engine/evaluation/nnue/../../../utils/types.h \
+ /home/ereny/Projects/integral/src/engine/evaluation/eval_cache.h \
+ /home/ereny/Projects/integral/src/engine/evaluation/../../utils/types.h

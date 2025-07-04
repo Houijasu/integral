@@ -61,6 +61,8 @@ bool StaticExchange(Move move, int threshold, const BoardState &state);
 
 Score Evaluate(Board &board);
 
+void ClearEvalCache();
+
 }  // namespace eval
 
 #endif  // INTEGRAL_EVAL_H_
