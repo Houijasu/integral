@@ -2,6 +2,7 @@
 #define INTEGRAL_MOVE_PICKER_H_
 
 #include <algorithm>
+#include <iterator>
 
 #include "../../chess/move_gen.h"
 #include "../evaluation/evaluation.h"
@@ -67,6 +68,11 @@ class MovePicker {
   List<ScoredMove, kMaxMoves> quiets_;
   int moves_idx_;
   int see_threshold_;
+  
+  // Pre-calculated threat maps
+  BitBoard pawn_threats_;
+  BitBoard minor_threats_;
+  BitBoard rook_threats_;
 };
 
 }  // namespace search

@@ -150,6 +150,33 @@ void MovePicker::SkipQuiets() {
 
 Move &MovePicker::SelectionSort(List<ScoredMove, kMaxMoves> &move_list,
                                 int index) {
+  // For the first few moves, use partial sort for better performance
+  if (index == 0 && move_list.Size() > 8) {
+    // Find top 3 moves efficiently
+    const int top_k = std::min(3, move_list.Size());
+    
+    // Initialize with first k elements
+    for (int i = 0; i < top_k; ++i) {
+      for (int j = i + 1; j < top_k; ++j) {
+        if (move_list[j].score > move_list[i].score) {
+          std::swap(move_list[i], move_list[j]);
+        }
+      }
+    }
+    
+    // Check remaining elements against the kth best
+    for (int i = top_k; i < move_list.Size(); ++i) {
+      if (move_list[i].score > move_list[top_k - 1].score) {
+        // Insert into sorted top-k
+        move_list[top_k - 1] = move_list[i];
+        for (int j = top_k - 1; j > 0 && move_list[j].score > move_list[j-1].score; --j) {
+          std::swap(move_list[j], move_list[j-1]);
+        }
+      }
+    }
+  }
+  
+  // Standard selection for current index
   int best_move_idx = index;
   int best_score = move_list[index].score;
   for (int next = index + 1; next < move_list.Size(); ++next) {
@@ -173,6 +200,14 @@ void MovePicker::GenerateAndScoreMoves(List<ScoredMove, kMaxMoves> &list) {
   const auto &killers = stack_->killer_moves;
   const bool killer_0_noisy = killers[0].IsNoisy(state),
              killer_1_noisy = killers[1].IsNoisy(state);
+
+  // Pre-calculate threat maps for move scoring
+  if constexpr (move_type == MoveGenType::kQuiet) {
+    pawn_threats_ = state.threatened_by[kPawn];
+    minor_threats_ = pawn_threats_ | state.threatened_by[kKnight] | 
+                     state.threatened_by[kBishop];
+    rook_threats_ = minor_threats_ | state.threatened_by[kRook];
+  }
 
   auto moves = move_gen::GenerateMoves<move_type>(board_);
   for (int i = 0; i < moves.Size(); i++) {
@@ -211,28 +246,26 @@ int MovePicker::ScoreMove(Move &move) {
     return victim_value + history_.GetCaptureMoveScore(state, move);
   }
 
-  const BitBoard pawn_threats = state.threatened_by[kPawn];
-  const BitBoard minor_threats = pawn_threats | state.threatened_by[kKnight] |
-                                 state.threatened_by[kBishop];
-  const BitBoard rook_threats = minor_threats | state.threatened_by[kRook];
-
+  // Use pre-calculated threat maps if available (for quiet moves)
   int threat_score = 0;
-  switch (state.GetPieceType(from)) {
-    case kQueen:
-      if (rook_threats.IsSet(from)) threat_score += kQueenRookThreatScorePos;
-      if (rook_threats.IsSet(to)) threat_score -= kQueenRookThreatScoreNeg;
-      break;
-    case kRook:
-      if (minor_threats.IsSet(from)) threat_score += kRookMinorThreatScorePos;
-      if (minor_threats.IsSet(to)) threat_score -= kRookMinorThreatScoreNeg;
-      break;
-    case kBishop:
-    case kKnight:
-      if (pawn_threats.IsSet(from)) threat_score += kMinorPawnThreatScorePos;
-      if (pawn_threats.IsSet(to)) threat_score -= kMinorPawnThreatScoreNeg;
-      break;
-    default:
-      break;
+  if (!move.IsCapture(state)) {
+    switch (state.GetPieceType(from)) {
+      case kQueen:
+        if (rook_threats_.IsSet(from)) threat_score += kQueenRookThreatScorePos;
+        if (rook_threats_.IsSet(to)) threat_score -= kQueenRookThreatScoreNeg;
+        break;
+      case kRook:
+        if (minor_threats_.IsSet(from)) threat_score += kRookMinorThreatScorePos;
+        if (minor_threats_.IsSet(to)) threat_score -= kRookMinorThreatScoreNeg;
+        break;
+      case kBishop:
+      case kKnight:
+        if (pawn_threats_.IsSet(from)) threat_score += kMinorPawnThreatScorePos;
+        if (pawn_threats_.IsSet(to)) threat_score -= kMinorPawnThreatScoreNeg;
+        break;
+      default:
+        break;
+    }
   }
 
   // Order moves that caused a beta cutoff by their own history score
